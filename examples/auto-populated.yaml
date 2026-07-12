@@ -1,0 +1,40 @@
+# Self-filling mixer and clip deck — no entity IDs to maintain. New layers
+# and clips appear automatically as you add them in Arena.
+#
+# Requires the community "auto-entities" card (install via HACS:
+# https://github.com/thomasloven/lovelace-auto-entities).
+
+type: vertical-stack
+cards:
+  # Every Resolume fader as a live vertical fader, master last.
+  - type: custom:auto-entities
+    card:
+      type: grid
+      columns: 5
+      square: false
+    card_param: cards
+    filter:
+      include:
+        - entity_id: "number.resolume_*_master"
+          options:
+            type: custom:resolume-fader-card
+    sort:
+      method: friendly_name
+
+  # Every clip as a thumbnail tile.
+  - type: custom:auto-entities
+    card:
+      type: grid
+      columns: 4
+      square: false
+    card_param: cards
+    filter:
+      include:
+        - domain: button
+          attributes:
+            clip_index: ">0"
+          options:
+            type: custom:resolume-clip-card
+    sort:
+      method: attribute
+      attribute: layer_index

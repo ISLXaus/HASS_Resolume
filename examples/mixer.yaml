@@ -1,0 +1,24 @@
+# A mixer strip: live vertical faders for each layer plus the composition
+# master. Faders stream to Arena while you drag.
+#
+# Replace the entities with your own layer masters.
+
+type: grid
+columns: 5
+square: false
+cards:
+  - type: custom:resolume-fader-card
+    entity: number.resolume_127_0_0_1_background_master
+    name: BG
+  - type: custom:resolume-fader-card
+    entity: number.resolume_127_0_0_1_fx_master
+    name: FX
+  - type: custom:resolume-fader-card
+    entity: number.resolume_127_0_0_1_text_master
+    name: Text
+  - type: custom:resolume-fader-card
+    entity: number.resolume_127_0_0_1_cameras_master
+    name: Cams
+  - type: custom:resolume-fader-card
+    entity: number.resolume_127_0_0_1_composition_master
+    name: MASTER

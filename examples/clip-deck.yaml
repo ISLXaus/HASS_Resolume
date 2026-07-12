@@ -1,0 +1,31 @@
+# A Resolume-style clip deck: thumbnails, green highlight while playing,
+# tap to trigger. One row per layer works well (like Arena's grid).
+#
+# Replace the entities with your own clips.
+
+type: vertical-stack
+cards:
+  - type: grid # Layer: Background
+    columns: 4
+    square: false
+    cards:
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_intro_loop
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_main_visual
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_breakdown
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_outro
+  - type: grid # Layer: FX
+    columns: 4
+    square: false
+    cards:
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_strobe
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_glitch
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_smoke
+      - type: custom:resolume-clip-card
+        entity: button.resolume_127_0_0_1_rays

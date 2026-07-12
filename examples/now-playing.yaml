@@ -1,0 +1,54 @@
+# Status cards built only from Home Assistant's built-in template cards —
+# no custom cards required. Paste individual cards or the whole stack.
+
+type: vertical-stack
+cards:
+  # "Now playing" — lists every connected clip with its layer.
+  - type: markdown
+    title: Now playing
+    content: >-
+      {% set playing = states.button
+        | selectattr('attributes.playing', 'eq', true)
+        | selectattr('attributes.clip_name', 'defined')
+        | list %}
+      {% if playing %}
+      {% for clip in playing %}
+      ▶ **{{ clip.attributes.clip_name }}** — {{ clip.attributes.layer_name }}
+      {% endfor %}
+      {% else %}
+      *Nothing playing*
+      {% endif %}
+
+  # Connection / composition health at a glance.
+  - type: markdown
+    content: >-
+      {% set master = states('number.resolume_127_0_0_1_composition_master') %}
+      {% if master in ('unavailable', 'unknown') %}
+      🔴 **Resolume is offline**
+      {% else %}
+      🟢 Resolume online — composition master at **{{ master | round(0) }}%**
+      {% endif %}
+
+  # A big "playing" indicator tile for one specific clip.
+  # (Tap behaviour: triggers the clip.)
+  - type: tile
+    entity: button.resolume_127_0_0_1_intro_loop
+    name: Intro Loop
+    color: >-
+      green
+    tap_action:
+      action: perform-action
+      perform_action: button.press
+      target:
+        entity_id: button.resolume_127_0_0_1_intro_loop
+
+  # Conditional warning that only appears when a specific clip is live.
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: button.resolume_127_0_0_1_strobe
+        attribute: playing
+        state: true
+    card:
+      type: markdown
+      content: "⚠️ **STROBE IS LIVE**"

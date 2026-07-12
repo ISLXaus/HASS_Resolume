@@ -1,0 +1,69 @@
+# A complete performance view: now-playing header, clip deck on the left,
+# mixer on the right. Paste into a dashboard's raw configuration editor
+# (⋮ -> Raw configuration editor) as a view, then replace the entities.
+
+views:
+  - title: Resolume
+    path: resolume
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: markdown
+            content: >-
+              {% set playing = states.button
+                | selectattr('attributes.playing', 'eq', true)
+                | selectattr('attributes.clip_name', 'defined')
+                | list %}
+              {% if playing %}
+              ▶ Now playing: {% for clip in playing %}**{{
+                clip.attributes.clip_name }}** ({{
+                clip.attributes.layer_name }}){{
+                ", " if not loop.last }}{% endfor %}
+              {% else %}
+              ⏹ Nothing playing
+              {% endif %}
+
+      # Clip deck (left, two columns wide)
+      - type: grid
+        column_span: 2
+        cards:
+          - type: grid
+            columns: 4
+            square: false
+            cards:
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_intro_loop
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_main_visual
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_breakdown
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_outro
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_strobe
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_glitch
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_smoke
+              - type: custom:resolume-clip-card
+                entity: button.resolume_127_0_0_1_rays
+
+      # Mixer (right)
+      - type: grid
+        cards:
+          - type: grid
+            columns: 3
+            square: false
+            cards:
+              - type: custom:resolume-fader-card
+                entity: number.resolume_127_0_0_1_background_master
+                name: BG
+              - type: custom:resolume-fader-card
+                entity: number.resolume_127_0_0_1_fx_master
+                name: FX
+              - type: custom:resolume-fader-card
+                entity: number.resolume_127_0_0_1_composition_master
+                name: MASTER

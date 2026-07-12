@@ -123,6 +123,15 @@ lovelace:
       type: module
 ```
 
+## Dashboard templates
+
+Ready-to-paste templates live in [examples/](examples/README.md): a
+[mixer strip](examples/mixer.yaml), a [clip deck](examples/clip-deck.yaml),
+a [full performance view](examples/performance.yaml), built-in-card
+[now-playing/status templates](examples/now-playing.yaml), and
+[self-populating variants](examples/auto-populated.yaml) that discover
+your faders and clips automatically.
+
 ## Automations
 
 ```yaml
