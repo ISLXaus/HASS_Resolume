@@ -31,7 +31,7 @@ async def async_setup_entry(
     def _sync_entities() -> None:
         new = [
             ResolumeFaderNumber(entry, coordinator, key)
-            for key in coordinator.data
+            for key in coordinator.data.faders
             if key not in known
         ]
         if new:
@@ -79,7 +79,7 @@ class ResolumeFaderNumber(
     @property
     def _fader(self) -> FaderState | None:
         """Return this entity's fader state."""
-        return self.coordinator.data.get(self.fader_key)
+        return self.coordinator.data.faders.get(self.fader_key)
 
     @property
     def available(self) -> bool:

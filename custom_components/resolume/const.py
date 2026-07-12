@@ -12,3 +12,17 @@ DEFAULT_PORT: Final = 8080
 # Seconds between REST resyncs (safety net; live updates come over the
 # WebSocket push channel).
 UPDATE_INTERVAL: Final = 30
+
+# Route pattern for the thumbnail proxy view.
+THUMBNAIL_URL: Final = (
+    "/api/resolume/{entry_id}/thumbnail/{layer_index}/{clip_index}.png"
+)
+
+# hass.data keys
+DATA_THUMBNAIL_TOKENS: Final = "thumbnail_tokens"
+DATA_FRONTEND: Final = "frontend_registered"
+DATA_VIEW: Final = "view_registered"
+
+# Frontend card
+CARD_FILENAME: Final = "resolume-clip-card.js"
+CARD_URL_BASE: Final = "/resolume_card"

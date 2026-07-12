@@ -9,6 +9,11 @@ kept in sync in real time in both directions.
 
 - **Layer master sliders** — every layer's master fader becomes a
   `number` entity (0–100 %), plus one for the composition master.
+- **Clip triggering with live thumbnails** — every clip in the grid
+  becomes a `button` entity carrying its Resolume thumbnail and playing
+  state; pressing it connects the clip, exactly like clicking it in
+  Arena. The bundled **resolume-clip-card** shows the thumbnail with a
+  green "connected" highlight and triggers on tap.
 - **Real-time, bidirectional** — changes made in Resolume (or on a
   controller) push to Home Assistant instantly over the webserver's
   WebSocket channel; moving a slider in Home Assistant sets the parameter
@@ -52,6 +57,52 @@ number.resolume_<host>_background_master    Layer "Background" master
 State is the fader position as a percentage (0–100). Attributes include
 the raw Resolume value (typically 0.0–1.0), the layer index/id and the
 parameter path.
+
+Every non-empty clip slot becomes a button entity:
+
+```text
+button.resolume_<host>_intro_loop
+```
+
+Pressing it connects (triggers) the clip. Attributes: `clip_name`,
+`layer_name`, `layer_index`, `clip_index`, `connected` (raw state) and
+`playing` (boolean, pushed live). The clip's thumbnail is the entity
+picture, proxied through Home Assistant so it also works via remote
+access and the mobile apps; empty grid slots are skipped.
+
+## The Resolume Clip Card
+
+The card ships inside the integration and registers itself as a Lovelace
+resource automatically (storage-mode dashboards):
+
+```yaml
+type: custom:resolume-clip-card
+entity: button.resolume_127_0_0_1_intro_loop
+```
+
+It renders the live thumbnail with the clip name; a connected (playing)
+clip gets Resolume's green highlight. Tap to trigger. Build a clip deck
+with a grid:
+
+```yaml
+type: grid
+columns: 4
+cards:
+  - type: custom:resolume-clip-card
+    entity: button.resolume_127_0_0_1_intro_loop
+  - type: custom:resolume-clip-card
+    entity: button.resolume_127_0_0_1_main_visual
+  # … one card per clip
+```
+
+If your dashboards are in YAML mode, add the resource manually:
+
+```yaml
+lovelace:
+  resources:
+    - url: /resolume_card/resolume-clip-card.js
+      type: module
+```
 
 ## Automations
 

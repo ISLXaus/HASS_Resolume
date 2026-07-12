@@ -115,6 +115,34 @@ class ResolumeClient:
             "PUT", f"/parameter/by-id/{parameter_id}", json={"value": value}
         )
 
+    async def async_connect_clip(
+        self, layer_index: int, clip_index: int
+    ) -> None:
+        """Trigger (connect) a clip by its grid position (1-based)."""
+        await self._request(
+            "POST",
+            f"/composition/layers/{layer_index}/clips/{clip_index}/connect",
+        )
+
+    async def async_get_thumbnail(
+        self, layer_index: int, clip_index: int
+    ) -> bytes:
+        """Fetch a clip's PNG thumbnail by grid position (1-based)."""
+        url = (
+            f"{self.base_url}/composition/layers/{layer_index}"
+            f"/clips/{clip_index}/thumbnail"
+        )
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                response = await self._session.get(url)
+                async with response:
+                    response.raise_for_status()
+                    return await response.read()
+        except (aiohttp.ClientError, OSError, TimeoutError) as err:
+            raise ResolumeConnectionError(
+                f"Error fetching thumbnail from {url}: {err}"
+            ) from err
+
     # WebSocket push channel
 
     async def async_start_ws(self) -> None:

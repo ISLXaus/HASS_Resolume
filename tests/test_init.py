@@ -38,6 +38,9 @@ def _enable(enable_custom_integrations, socket_enabled):
     return
 
 
+FAKE_PNG = b"\x89PNG\r\n\x1a\nfakepng"
+
+
 def make_composition(layer1_value: float = 0.5) -> dict:
     return {
         "name": {"value": "My Comp"},
@@ -52,6 +55,17 @@ def make_composition(layer1_value: float = 0.5) -> dict:
                     "min": 0.0,
                     "max": 1.0,
                 },
+                "clips": [
+                    {
+                        "id": 9001,
+                        "name": {"value": "Intro Loop"},
+                        "connected": {"value": "Disconnected"},
+                        "thumbnail": {
+                            "last_update": "1700000000123",
+                            "is_default": False,
+                        },
+                    },
+                ],
             },
         ],
     }
@@ -63,6 +77,7 @@ class FakeResolume:
 
     composition: dict = field(default_factory=make_composition)
     puts: list[tuple[int, dict]] = field(default_factory=list)
+    connects: list[tuple[int, int]] = field(default_factory=list)
     subscriptions: list[str] = field(default_factory=list)
     ws: web.WebSocketResponse | None = None
 
@@ -79,6 +94,18 @@ class FakeResolume:
         self.puts.append((param_id, await request.json()))
         return web.Response(status=204)
 
+    async def connect_clip(self, request: web.Request) -> web.Response:
+        self.connects.append(
+            (
+                int(request.match_info["layer"]),
+                int(request.match_info["clip"]),
+            )
+        )
+        return web.Response(status=204)
+
+    async def thumbnail(self, request: web.Request) -> web.Response:
+        return web.Response(body=FAKE_PNG, content_type="image/png")
+
     async def websocket(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -91,7 +118,7 @@ class FakeResolume:
                 self.subscriptions.append(data["parameter"])
         return ws
 
-    async def push(self, path: str, value: float) -> None:
+    async def push(self, path: str, value: object) -> None:
         assert self.ws is not None
         await self.ws.send_json(
             {"type": "parameter_update", "path": path, "value": value}
@@ -106,6 +133,14 @@ async def fake_resolume() -> AsyncIterator[tuple[FakeResolume, int]]:
     app.router.add_get("/api/v1/composition", fake.get_composition)
     app.router.add_put(
         "/api/v1/parameter/by-id/{param_id}", fake.put_parameter
+    )
+    app.router.add_post(
+        "/api/v1/composition/layers/{layer}/clips/{clip}/connect",
+        fake.connect_clip,
+    )
+    app.router.add_get(
+        "/api/v1/composition/layers/{layer}/clips/{clip}/thumbnail",
+        fake.thumbnail,
     )
     app.router.add_get("/api/v1", fake.websocket)
     server = TestServer(app)
@@ -178,6 +213,68 @@ async def test_sliders_created_and_set(hass: HomeAssistant) -> None:
         assert (
             float(hass.states.get(layer.entity_id).state) == 75.0
         )  # optimistic
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_clip_button_and_thumbnail(
+    hass: HomeAssistant, hass_client
+) -> None:
+    async with fake_resolume() as (fake, port):
+        entry = await _setup(hass, port)
+
+        clip = hass.states.get("button.resolume_127_0_0_1_intro_loop")
+        assert clip is not None
+        assert clip.attributes["clip_name"] == "Intro Loop"
+        assert clip.attributes["layer_index"] == 1
+        assert clip.attributes["clip_index"] == 1
+        assert clip.attributes["playing"] is False
+
+        # Pressing the button connects the clip in Resolume.
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": clip.entity_id},
+            blocking=True,
+        )
+        assert fake.connects == [(1, 1)]
+
+        # The entity picture is a token-gated proxy URL serving the PNG.
+        picture = clip.attributes["entity_picture"]
+        assert picture.startswith(
+            f"/api/resolume/{entry.entry_id}/thumbnail/1/1.png?token="
+        )
+        assert "cb=1700000000123" in picture
+        client = await hass_client()
+        response = await client.get(picture)
+        assert response.status == 200
+        assert await response.read() == FAKE_PNG
+
+        # A wrong token is rejected.
+        bad = picture.split("?")[0] + "?token=wrong"
+        response = await client.get(bad)
+        assert response.status == 401
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_ws_push_updates_clip_connected(hass: HomeAssistant) -> None:
+    async with fake_resolume() as (fake, port):
+        entry = await _setup(hass, port)
+
+        await _wait_for(
+            lambda: "/composition/layers/1/clips/1/connected"
+            in fake.subscriptions
+        )
+        await fake.push("/composition/layers/1/clips/1/connected", "Connected")
+        await _wait_for(
+            lambda: hass.states.get(
+                "button.resolume_127_0_0_1_intro_loop"
+            ).attributes["playing"]
+            is True
+        )
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
