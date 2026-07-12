@@ -1,0 +1,6 @@
+pytest>=8.0
+pytest-asyncio>=0.23
+aiohttp>=3.10
+# Optional: enables the end-to-end Home Assistant tests, which are
+# skipped when not installed.
+pytest-homeassistant-custom-component
