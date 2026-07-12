@@ -23,6 +23,6 @@ DATA_THUMBNAIL_TOKENS: Final = "thumbnail_tokens"
 DATA_FRONTEND: Final = "frontend_registered"
 DATA_VIEW: Final = "view_registered"
 
-# Frontend card
-CARD_FILENAME: Final = "resolume-clip-card.js"
+# Frontend cards
+CARD_FILENAMES: Final = ("resolume-clip-card.js", "resolume-fader-card.js")
 CARD_URL_BASE: Final = "/resolume_card"

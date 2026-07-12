@@ -21,7 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import ResolumeConnectionError
 from .client import ResolumeClient
 from .const import (
-    CARD_FILENAME,
+    CARD_FILENAMES,
     CARD_URL_BASE,
     DATA_FRONTEND,
     DATA_THUMBNAIL_TOKENS,
@@ -35,7 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.BUTTON, Platform.NUMBER]
 
-INTEGRATION_VERSION = "1.1.0"
+INTEGRATION_VERSION = "1.2.0"
 
 
 async def async_setup_entry(
@@ -91,37 +91,53 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL_BASE, str(card_dir), cache_headers=False)]
     )
-    card_url = f"{CARD_URL_BASE}/{CARD_FILENAME}?v={INTEGRATION_VERSION}"
+    card_urls = [
+        f"{CARD_URL_BASE}/{filename}?v={INTEGRATION_VERSION}"
+        for filename in CARD_FILENAMES
+    ]
 
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
     if resources is None or getattr(lovelace, "mode", "storage") != "storage":
         _LOGGER.info(
-            "Lovelace is not in storage mode; add %s as a Lovelace "
-            "resource manually to use resolume-clip-card",
-            card_url,
+            "Lovelace is not in storage mode; add these as Lovelace "
+            "resources manually to use the Resolume cards: %s",
+            ", ".join(card_urls),
         )
         return
     try:
         if not resources.loaded:
             await resources.async_load()
             resources.loaded = True
-        for item in resources.async_items():
-            url = str(item.get("url", ""))
-            if url.startswith(f"{CARD_URL_BASE}/{CARD_FILENAME}"):
-                if url != card_url:  # bump cache-busting version
-                    await resources.async_update_item(
-                        item["id"], {"url": card_url}
-                    )
-                return
-        await resources.async_create_item(
-            {"res_type": "module", "url": card_url}
-        )
-        _LOGGER.info("Registered Lovelace resource %s", card_url)
-    except Exception:  # noqa: BLE001 - never break setup over the card
+        existing = {
+            str(item.get("url", "")): item for item in resources.async_items()
+        }
+        for filename, card_url in zip(
+            CARD_FILENAMES, card_urls, strict=True
+        ):
+            base = f"{CARD_URL_BASE}/{filename}"
+            item = next(
+                (
+                    item
+                    for url, item in existing.items()
+                    if url.startswith(base)
+                ),
+                None,
+            )
+            if item is None:
+                await resources.async_create_item(
+                    {"res_type": "module", "url": card_url}
+                )
+                _LOGGER.info("Registered Lovelace resource %s", card_url)
+            elif str(item.get("url")) != card_url:  # bump cache-buster
+                await resources.async_update_item(
+                    item["id"], {"url": card_url}
+                )
+                _LOGGER.info("Updated Lovelace resource to %s", card_url)
+    except Exception:  # noqa: BLE001 - never break setup over the cards
         _LOGGER.warning(
-            "Could not register the resolume-clip-card Lovelace resource "
-            "automatically; add %s manually",
-            card_url,
+            "Could not register the Resolume card Lovelace resources "
+            "automatically; add these manually: %s",
+            ", ".join(card_urls),
             exc_info=True,
         )

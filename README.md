@@ -95,12 +95,31 @@ cards:
   # … one card per clip
 ```
 
-If your dashboards are in YAML mode, add the resource manually:
+## The Resolume Fader Card
+
+Home Assistant's built-in slider only sends the value when you release
+it. The bundled **resolume-fader-card** is a vertical fader that streams
+updates to Arena live while you drag (throttled to ~10 per second), so it
+behaves like a real fader:
+
+```yaml
+type: custom:resolume-fader-card
+entity: number.resolume_127_0_0_1_background_master
+name: Background   # optional
+```
+
+Put one card per layer in a `grid` for a mixer view. Incoming changes
+(faders moved in Arena) stay live as always; while you're dragging, your
+finger wins.
+
+If your dashboards are in YAML mode, add the resources manually:
 
 ```yaml
 lovelace:
   resources:
     - url: /resolume_card/resolume-clip-card.js
+      type: module
+    - url: /resolume_card/resolume-fader-card.js
       type: module
 ```
 
