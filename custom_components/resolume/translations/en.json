@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Resolume",
+        "description": "Enter the address of the Resolume webserver. Enable it in Arena/Avenue under Preferences → Webserver (default port 8080).",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the host and port, and make sure the webserver is enabled in Resolume's preferences.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This Resolume instance is already configured"
+    }
+  }
+}
