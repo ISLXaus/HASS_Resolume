@@ -22,7 +22,9 @@ from homeassistant.helpers.update_coordinator import (
 from .api import (
     CompositionModel,
     ResolumeConnectionError,
+    empty_model,
     extract_parameter_update,
+    parse_bool_value,
     parse_composition,
 )
 from .client import ResolumeClient
@@ -53,9 +55,10 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
         self.client = client
-        self._model = CompositionModel(faders={}, clips={})
+        self._model = empty_model()
         self._fader_paths: dict[str, str] = {}  # parameter path -> fader key
         self._clip_paths: dict[str, str] = {}  # connected path -> clip key
+        self._toggle_paths: dict[str, str] = {}  # path -> toggle key
 
         client.on_message = self._on_ws_message
         client.on_ws_connected = self._async_on_ws_connected
@@ -86,7 +89,10 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
     def _snapshot(self) -> CompositionModel:
         """Return a fresh copy of the model for listeners."""
         return CompositionModel(
-            faders=dict(self._model.faders), clips=dict(self._model.clips)
+            faders=dict(self._model.faders),
+            clips=dict(self._model.clips),
+            toggles=dict(self._model.toggles),
+            triggers=dict(self._model.triggers),
         )
 
     def _apply_composition(self, data: dict[str, Any]) -> None:
@@ -100,6 +106,10 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
             clip.connected_path: key
             for key, clip in self._model.clips.items()
         }
+        self._toggle_paths = {
+            toggle.parameter_path: key
+            for key, toggle in self._model.toggles.items()
+        }
 
     # WebSocket push handling
 
@@ -109,7 +119,11 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
             self._apply_composition(await self.client.async_get_composition())
         except ResolumeConnectionError as err:
             _LOGGER.debug("Resync after WS connect failed: %s", err)
-        for path in (*self._fader_paths, *self._clip_paths):
+        for path in (
+            *self._fader_paths,
+            *self._clip_paths,
+            *self._toggle_paths,
+        ):
             await self.client.async_subscribe(path)
         self.async_set_updated_data(self._snapshot())
 
@@ -149,6 +163,13 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
                 return
             self._model.clips[clip_key] = clip.with_connected(connected)
             self.async_set_updated_data(self._snapshot())
+        elif (toggle_key := self._toggle_paths.get(path)) is not None:
+            toggle = self._model.toggles.get(toggle_key)
+            boolean = parse_bool_value(value)
+            if toggle is None or toggle.value == boolean:
+                return
+            self._model.toggles[toggle_key] = toggle.with_value(boolean)
+            self.async_set_updated_data(self._snapshot())
 
     # Commands
 
@@ -173,3 +194,30 @@ class ResolumeCoordinator(DataUpdateCoordinator[CompositionModel]):
         await self.client.async_connect_clip(
             clip.layer_index, clip.clip_index
         )
+
+    async def async_set_toggle(self, key: str, value: bool) -> None:
+        """Set a boolean parameter (bypass/solo) by its stable key."""
+        toggle = self._model.toggles.get(key)
+        if toggle is None or toggle.parameter_id is None:
+            raise ResolumeConnectionError(f"Unknown toggle {key}")
+        await self.client.async_set_parameter(toggle.parameter_id, value)
+        # Optimistic local update; Resolume will confirm via push/resync.
+        self._model.toggles[key] = toggle.with_value(value)
+        self.async_set_updated_data(self._snapshot())
+
+    async def async_run_trigger(self, key: str) -> None:
+        """Run a one-shot trigger (column, disconnect all, tap tempo)."""
+        trigger = self._model.triggers.get(key)
+        if trigger is None:
+            raise ResolumeConnectionError(f"Unknown trigger {key}")
+        if trigger.trigger_type == "column" and trigger.column_index:
+            await self.client.async_connect_column(trigger.column_index)
+        elif trigger.trigger_type == "disconnect_all":
+            await self.client.async_disconnect_all()
+        elif (
+            trigger.trigger_type == "parameter"
+            and trigger.parameter_id is not None
+        ):
+            await self.client.async_trigger_parameter(trigger.parameter_id)
+        else:
+            raise ResolumeConnectionError(f"Trigger {key} is not actionable")

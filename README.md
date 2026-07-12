@@ -7,8 +7,15 @@ kept in sync in real time in both directions.
 
 ## Features
 
-- **Layer master sliders** — every layer's master fader becomes a
-  `number` entity (0–100 %), plus one for the composition master.
+- **Every fader as a slider** — layer masters, layer opacity and audio
+  volume, layer-group masters, the composition master, speed, opacity,
+  volume and the crossfader all become `number` entities (0–100 % of each
+  parameter's range).
+- **Bypass & solo switches** — composition bypass plus per-layer bypass
+  and solo become `switch` entities, updating live.
+- **Column & action buttons** — one button per column (connects the whole
+  column, named after it), a *Disconnect all* button and a *Tap tempo*
+  button.
 - **Clip triggering with live thumbnails** — every clip in the grid
   becomes a `button` entity carrying its Resolume thumbnail and playing
   state; pressing it connects the clip, exactly like clicking it in
@@ -50,8 +57,23 @@ restart.
 One slider per fader, e.g.:
 
 ```text
-number.resolume_<host>_composition_master   Composition master
-number.resolume_<host>_background_master    Layer "Background" master
+number.resolume_<host>_composition_master    Composition master
+number.resolume_<host>_composition_speed     Composition speed
+number.resolume_<host>_crossfader            Crossfader
+number.resolume_<host>_background_master     Layer "Background" master
+number.resolume_<host>_background_opacity    Layer "Background" opacity
+number.resolume_<host>_background_volume     Layer "Background" volume
+```
+
+Switches and action buttons:
+
+```text
+switch.resolume_<host>_background_bypassed   Layer bypass
+switch.resolume_<host>_background_solo       Layer solo
+switch.resolume_<host>_composition_bypassed  Composition bypass
+button.resolume_<host>_column_verse          Connect column "Verse"
+button.resolume_<host>_disconnect_all        Disconnect all clips
+button.resolume_<host>_tap_tempo             Tap tempo
 ```
 
 State is the fader position as a percentage (0–100). Attributes include

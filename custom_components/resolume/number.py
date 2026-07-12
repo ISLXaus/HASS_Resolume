@@ -11,7 +11,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import KIND_COMPOSITION, FaderState
+from .api import KIND_COMPOSITION, KIND_LAYER, FaderState
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import ResolumeConfigEntry, ResolumeCoordinator
 
@@ -64,7 +64,13 @@ class ResolumeFaderNumber(
         """Initialize the fader entity."""
         super().__init__(coordinator)
         self.fader_key = key
-        self._attr_unique_id = f"{entry.entry_id}_{key}_master"
+        fader = coordinator.data.faders[key]
+        # Masters predate the generic fader support; keep their original
+        # unique ids so existing entity registry entries survive upgrades.
+        if fader.kind in (KIND_COMPOSITION, KIND_LAYER):
+            self._attr_unique_id = f"{entry.entry_id}_{key}_master"
+        else:
+            self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             manufacturer=MANUFACTURER,
@@ -88,13 +94,9 @@ class ResolumeFaderNumber(
 
     @property
     def name(self) -> str:
-        """Follow the layer name from Resolume."""
+        """Follow the fader's display name from Resolume."""
         fader = self._fader
-        if fader is None:
-            return "Master"
-        if fader.kind == KIND_COMPOSITION:
-            return "Composition master"
-        return f"{fader.name} master"
+        return fader.name if fader else "Fader"
 
     @property
     def native_value(self) -> float | None:

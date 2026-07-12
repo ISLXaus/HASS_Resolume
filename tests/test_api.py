@@ -21,11 +21,50 @@ def make_composition() -> dict:
             "min": 0.0,
             "max": 1.0,
         },
+        "speed": {"id": 110, "value": 2.0, "min": 0.0, "max": 10.0},
+        "bypassed": {"id": 111, "value": False},
+        "crossfader": {
+            "id": 900,
+            "phase": {"id": 112, "value": 0.5, "min": 0.0, "max": 1.0},
+        },
+        "tempocontroller": {
+            "tempo": {"id": 113, "value": 120.0, "min": 20.0, "max": 500.0},
+            "tempo_tap": {"id": 114},
+        },
+        "columns": [
+            {"id": 7001, "name": {"value": "Verse"}},
+            {"id": 7002, "name": {"value": ""}},
+        ],
+        "layergroups": [
+            {
+                "id": 8001,
+                "name": {"value": "Stage"},
+                "master": {"id": 115, "value": 1.0, "min": 0.0, "max": 1.0},
+            },
+        ],
         "layers": [
             {
                 "id": 5001,
                 "name": {"value": "Background"},
                 "master": {"id": 101, "value": 0.5, "min": 0.0, "max": 1.0},
+                "bypassed": {"id": 120, "value": False},
+                "solo": {"id": 121, "value": True},
+                "video": {
+                    "opacity": {
+                        "id": 122,
+                        "value": 0.8,
+                        "min": 0.0,
+                        "max": 1.0,
+                    },
+                },
+                "audio": {
+                    "volume": {
+                        "id": 123,
+                        "value": 0.6,
+                        "min": 0.0,
+                        "max": 1.0,
+                    },
+                },
                 "clips": [
                     {
                         "id": 9001,
@@ -57,7 +96,16 @@ def make_composition() -> dict:
 class TestParseComposition:
     def test_composition_and_layers(self) -> None:
         faders = parse_composition(make_composition()).faders
-        assert set(faders) == {"composition", "layer:5001", "layer:5002"}
+        assert set(faders) == {
+            "composition",
+            "composition:speed",
+            "crossfader",
+            "layer:5001",
+            "layer:5001:opacity",
+            "layer:5001:volume",
+            "layer:5002",
+            "group:8001:master",
+        }
 
         comp = faders["composition"]
         assert comp.kind == KIND_COMPOSITION
@@ -67,10 +115,56 @@ class TestParseComposition:
 
         layer = faders["layer:5001"]
         assert layer.kind == KIND_LAYER
-        assert layer.name == "Background"
+        assert layer.name == "Background master"
         assert layer.layer_index == 1
         assert layer.parameter_path == "/composition/layers/1/master"
         assert layer.percentage == 50.0
+
+    def test_extra_faders(self) -> None:
+        faders = parse_composition(make_composition()).faders
+        speed = faders["composition:speed"]
+        assert speed.name == "Composition speed"
+        assert speed.parameter_path == "/composition/speed"
+        assert speed.percentage == 20.0  # 2.0 in a 0..10 range
+
+        opacity = faders["layer:5001:opacity"]
+        assert opacity.name == "Background opacity"
+        assert opacity.parameter_path == "/composition/layers/1/video/opacity"
+        assert opacity.percentage == 80.0
+
+        assert faders["crossfader"].parameter_path == (
+            "/composition/crossfader/phase"
+        )
+        assert faders["group:8001:master"].name == "Stage master"
+
+    def test_toggles(self) -> None:
+        toggles = parse_composition(make_composition()).toggles
+        assert set(toggles) == {
+            "composition:bypassed",
+            "layer:5001:bypassed",
+            "layer:5001:solo",
+        }
+        solo = toggles["layer:5001:solo"]
+        assert solo.name == "Background solo"
+        assert solo.value is True
+        assert solo.parameter_id == 121
+        assert solo.parameter_path == "/composition/layers/1/solo"
+
+    def test_triggers(self) -> None:
+        triggers = parse_composition(make_composition()).triggers
+        assert set(triggers) == {
+            "column:7001",
+            "column:7002",
+            "disconnect_all",
+            "tempo_tap",
+        }
+        verse = triggers["column:7001"]
+        assert verse.name == "Column Verse"
+        assert verse.trigger_type == "column"
+        assert verse.column_index == 1
+        assert triggers["column:7002"].name == "Column 2"
+        assert triggers["tempo_tap"].parameter_id == 114
+        assert triggers["disconnect_all"].trigger_type == "disconnect_all"
 
     def test_layer_order_is_positional(self) -> None:
         data = make_composition()
@@ -100,7 +194,7 @@ class TestParseComposition:
         data = make_composition()
         del data["layers"][0]["name"]
         faders = parse_composition(data).faders
-        assert faders["layer:5001"].name == "Layer 1"
+        assert faders["layer:5001"].name == "Layer 1 master"
 
     def test_percentage_roundtrip(self) -> None:
         fader = parse_composition(make_composition()).faders["layer:5001"]

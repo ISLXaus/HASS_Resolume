@@ -45,6 +45,9 @@ def make_composition(layer1_value: float = 0.5) -> dict:
     return {
         "name": {"value": "My Comp"},
         "master": {"id": 100, "value": 1.0, "min": 0.0, "max": 1.0},
+        "speed": {"id": 110, "value": 2.0, "min": 0.0, "max": 10.0},
+        "bypassed": {"id": 111, "value": False},
+        "columns": [{"id": 7001, "name": {"value": "Verse"}}],
         "layers": [
             {
                 "id": 5001,
@@ -54,6 +57,15 @@ def make_composition(layer1_value: float = 0.5) -> dict:
                     "value": layer1_value,
                     "min": 0.0,
                     "max": 1.0,
+                },
+                "solo": {"id": 121, "value": False},
+                "video": {
+                    "opacity": {
+                        "id": 122,
+                        "value": 0.8,
+                        "min": 0.0,
+                        "max": 1.0,
+                    },
                 },
                 "clips": [
                     {
@@ -78,6 +90,8 @@ class FakeResolume:
     composition: dict = field(default_factory=make_composition)
     puts: list[tuple[int, dict]] = field(default_factory=list)
     connects: list[tuple[int, int]] = field(default_factory=list)
+    column_connects: list[int] = field(default_factory=list)
+    disconnect_alls: int = 0
     subscriptions: list[str] = field(default_factory=list)
     ws: web.WebSocketResponse | None = None
 
@@ -101,6 +115,14 @@ class FakeResolume:
                 int(request.match_info["clip"]),
             )
         )
+        return web.Response(status=204)
+
+    async def connect_column(self, request: web.Request) -> web.Response:
+        self.column_connects.append(int(request.match_info["column"]))
+        return web.Response(status=204)
+
+    async def disconnect_all(self, request: web.Request) -> web.Response:
+        self.disconnect_alls += 1
         return web.Response(status=204)
 
     async def thumbnail(self, request: web.Request) -> web.Response:
@@ -137,6 +159,12 @@ async def fake_resolume() -> AsyncIterator[tuple[FakeResolume, int]]:
     app.router.add_post(
         "/api/v1/composition/layers/{layer}/clips/{clip}/connect",
         fake.connect_clip,
+    )
+    app.router.add_post(
+        "/api/v1/composition/columns/{column}/connect", fake.connect_column
+    )
+    app.router.add_post(
+        "/api/v1/composition/disconnect-all", fake.disconnect_all
     )
     app.router.add_get(
         "/api/v1/composition/layers/{layer}/clips/{clip}/thumbnail",
@@ -255,6 +283,56 @@ async def test_clip_button_and_thumbnail(
         bad = picture.split("?")[0] + "?token=wrong"
         response = await client.get(bad)
         assert response.status == 401
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_extra_faders_switches_and_triggers(
+    hass: HomeAssistant,
+) -> None:
+    async with fake_resolume() as (fake, port):
+        entry = await _setup(hass, port)
+
+        # Additional faders: speed and layer opacity.
+        speed = hass.states.get(
+            "number.resolume_127_0_0_1_composition_speed"
+        )
+        assert speed is not None and float(speed.state) == 20.0
+        opacity = hass.states.get(
+            "number.resolume_127_0_0_1_background_opacity"
+        )
+        assert opacity is not None and float(opacity.state) == 80.0
+
+        # Solo switch: turning it on PUTs a boolean to the parameter id.
+        solo = hass.states.get("switch.resolume_127_0_0_1_background_solo")
+        assert solo is not None and solo.state == "off"
+        await hass.services.async_call(
+            "switch",
+            "turn_on",
+            {"entity_id": solo.entity_id},
+            blocking=True,
+        )
+        assert (121, {"value": True}) in fake.puts
+        assert hass.states.get(solo.entity_id).state == "on"
+
+        # Column trigger button.
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": "button.resolume_127_0_0_1_column_verse"},
+            blocking=True,
+        )
+        assert fake.column_connects == [1]
+
+        # Disconnect all button.
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": "button.resolume_127_0_0_1_disconnect_all"},
+            blocking=True,
+        )
+        assert fake.disconnect_alls == 1
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()

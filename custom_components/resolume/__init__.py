@@ -33,9 +33,9 @@ from .http import ResolumeThumbnailView
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.BUTTON, Platform.NUMBER]
+PLATFORMS = [Platform.BUTTON, Platform.NUMBER, Platform.SWITCH]
 
-INTEGRATION_VERSION = "1.2.0"
+INTEGRATION_VERSION = "1.3.0"
 
 
 async def async_setup_entry(

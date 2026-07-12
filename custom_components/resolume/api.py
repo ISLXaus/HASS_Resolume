@@ -1,8 +1,9 @@
 """Data model and composition parsing for the Resolume Arena REST API.
 
 This module has no Home Assistant dependencies so it can be unit tested in
-isolation. It turns Resolume's composition JSON (see
-https://resolume.com/docs/restapi/) into a flat map of fader states.
+isolation. It flattens Resolume's composition JSON (see
+https://resolume.com/docs/restapi/) into maps of faders (RangeParameters),
+toggles (BooleanParameters), triggers (one-shot actions) and clips.
 """
 
 from __future__ import annotations
@@ -32,15 +33,15 @@ def layer_master_path(index: int) -> str:
 
 @dataclass(slots=True, frozen=True)
 class FaderState:
-    """State of one master fader (composition or layer)."""
+    """State of one continuous fader (any RangeParameter)."""
 
-    key: str  # stable key: "composition" or "layer:<layer-id>"
-    kind: str
-    name: str  # display name, e.g. "Layer 1"
+    key: str  # stable key, e.g. "layer:5001" or "layer:5001:opacity"
+    kind: str  # "composition"/"layer" for masters (legacy ids), else "fader"
+    name: str  # full display name, e.g. "Background opacity"
     parameter_id: int | None  # Resolume's unique parameter id
-    parameter_path: str  # e.g. /composition/layers/1/master
-    layer_id: int | None  # Resolume's stable layer id
-    layer_index: int | None  # current 1-based position
+    parameter_path: str  # e.g. /composition/layers/1/video/opacity
+    layer_id: int | None  # Resolume's stable layer id, when applicable
+    layer_index: int | None  # current 1-based position, when applicable
     value: float
     minimum: float
     maximum: float
@@ -63,34 +64,33 @@ class FaderState:
         return replace(self, value=value)
 
 
-def _param_value(param: Any, default: str = "") -> str:
-    """Extract the value of a string parameter object."""
-    if isinstance(param, dict):
-        value = param.get("value")
-        if value is not None:
-            return str(value)
-    return default
+@dataclass(slots=True, frozen=True)
+class ToggleState:
+    """State of one boolean parameter (bypassed, solo, ...)."""
+
+    key: str  # e.g. "layer:5001:solo"
+    name: str  # e.g. "Background solo"
+    toggle_type: str  # "bypassed" or "solo"
+    parameter_id: int | None
+    parameter_path: str
+    layer_id: int | None
+    layer_index: int | None
+    value: bool
+
+    def with_value(self, value: bool) -> ToggleState:
+        """Return a copy with an updated value."""
+        return replace(self, value=value)
 
 
-def _parse_range(param: Any) -> tuple[int | None, float, float, float] | None:
-    """Extract (id, value, min, max) from a RangeParameter object."""
-    if not isinstance(param, dict):
-        return None
-    try:
-        value = float(param["value"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    param_id = param.get("id")
-    minimum = float(param.get("min", 0.0))
-    maximum = float(param.get("max", 1.0))
-    if maximum <= minimum:
-        minimum, maximum = 0.0, 1.0
-    return (
-        int(param_id) if param_id is not None else None,
-        value,
-        minimum,
-        maximum,
-    )
+@dataclass(slots=True, frozen=True)
+class TriggerState:
+    """A one-shot action: connect a column, disconnect all, tap tempo."""
+
+    key: str  # e.g. "column:301", "disconnect_all", "tempo_tap"
+    name: str
+    trigger_type: str  # "column", "disconnect_all" or "parameter"
+    column_index: int | None = None  # for column triggers (1-based)
+    parameter_id: int | None = None  # for parameter (event) triggers
 
 
 @dataclass(slots=True, frozen=True)
@@ -127,10 +127,144 @@ class ClipState:
 
 @dataclass(slots=True, frozen=True)
 class CompositionModel:
-    """Flattened view of the composition: faders and clips by stable key."""
+    """Flattened view of the composition, all keyed by stable ids."""
 
     faders: dict[str, FaderState]
     clips: dict[str, ClipState]
+    toggles: dict[str, ToggleState]
+    triggers: dict[str, TriggerState]
+
+
+def empty_model() -> CompositionModel:
+    """Return an empty composition model."""
+    return CompositionModel(faders={}, clips={}, toggles={}, triggers={})
+
+
+# Parameter object helpers
+
+
+def _param_value(param: Any, default: str = "") -> str:
+    """Extract the value of a string parameter object."""
+    if isinstance(param, dict):
+        value = param.get("value")
+        if value is not None:
+            return str(value)
+    return default
+
+
+def _param_id(param: Any) -> int | None:
+    """Extract the id of a parameter object."""
+    if isinstance(param, dict) and param.get("id") is not None:
+        try:
+            return int(param["id"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _parse_range(param: Any) -> tuple[int | None, float, float, float] | None:
+    """Extract (id, value, min, max) from a RangeParameter object."""
+    if not isinstance(param, dict):
+        return None
+    try:
+        value = float(param["value"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    minimum = float(param.get("min", 0.0))
+    maximum = float(param.get("max", 1.0))
+    if maximum <= minimum:
+        minimum, maximum = 0.0, 1.0
+    return _param_id(param), value, minimum, maximum
+
+
+def parse_bool_value(value: Any) -> bool:
+    """Interpret a pushed/parsed parameter value as a boolean."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "on", "yes")
+    return bool(value)
+
+
+def _parse_bool(param: Any) -> tuple[int | None, bool] | None:
+    """Extract (id, value) from a BooleanParameter object."""
+    if not isinstance(param, dict) or "value" not in param:
+        return None
+    return _param_id(param), parse_bool_value(param["value"])
+
+
+def _dig(data: Any, *keys: str) -> Any:
+    """Safely walk nested dicts."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+# Composition parsing
+
+
+class _ModelBuilder:
+    """Accumulates flattened state while walking the composition."""
+
+    def __init__(self) -> None:
+        self.faders: dict[str, FaderState] = {}
+        self.clips: dict[str, ClipState] = {}
+        self.toggles: dict[str, ToggleState] = {}
+        self.triggers: dict[str, TriggerState] = {}
+
+    def add_fader(
+        self,
+        param: Any,
+        *,
+        key: str,
+        kind: str,
+        name: str,
+        path: str,
+        layer_id: int | None = None,
+        layer_index: int | None = None,
+    ) -> None:
+        parsed = _parse_range(param)
+        if parsed is None:
+            return
+        param_id, value, minimum, maximum = parsed
+        self.faders[key] = FaderState(
+            key=key,
+            kind=kind,
+            name=name,
+            parameter_id=param_id,
+            parameter_path=path,
+            layer_id=layer_id,
+            layer_index=layer_index,
+            value=value,
+            minimum=minimum,
+            maximum=maximum,
+        )
+
+    def add_toggle(
+        self,
+        param: Any,
+        *,
+        key: str,
+        name: str,
+        toggle_type: str,
+        path: str,
+        layer_id: int | None = None,
+        layer_index: int | None = None,
+    ) -> None:
+        parsed = _parse_bool(param)
+        if parsed is None:
+            return
+        param_id, value = parsed
+        self.toggles[key] = ToggleState(
+            key=key,
+            name=name,
+            toggle_type=toggle_type,
+            parameter_id=param_id,
+            parameter_path=path,
+            layer_id=layer_id,
+            layer_index=layer_index,
+            value=value,
+        )
 
 
 def _parse_clip(
@@ -171,64 +305,190 @@ def _parse_clip(
     )
 
 
-def parse_composition(data: dict[str, Any]) -> CompositionModel:
-    """Parse composition JSON into fader and clip states by stable key."""
-    faders: dict[str, FaderState] = {}
-    clips: dict[str, ClipState] = {}
+def _parse_layer(
+    builder: _ModelBuilder, layer: dict[str, Any], position: int
+) -> None:
+    """Flatten one layer: master, opacity, volume, bypassed, solo, clips."""
+    layer_name = _param_value(layer.get("name"), f"Layer {position}")
+    layer_id_raw = layer.get("id")
+    layer_id = int(layer_id_raw) if layer_id_raw is not None else None
+    base_key = f"layer:{layer_id}" if layer_id is not None else f"pos:{position}"
+    base_path = f"/composition/layers/{position}"
+    common = {"layer_id": layer_id, "layer_index": position}
 
-    comp_master = _parse_range(data.get("master"))
-    if comp_master is not None:
-        param_id, value, minimum, maximum = comp_master
-        faders[KIND_COMPOSITION] = FaderState(
-            key=KIND_COMPOSITION,
-            kind=KIND_COMPOSITION,
-            name="Composition",
-            parameter_id=param_id,
-            parameter_path=COMPOSITION_MASTER_PATH,
-            layer_id=None,
-            layer_index=None,
-            value=value,
-            minimum=minimum,
-            maximum=maximum,
-        )
+    builder.add_fader(
+        layer.get("master"),
+        key=base_key,  # legacy key kept for existing master entity ids
+        kind=KIND_LAYER,
+        name=f"{layer_name} master",
+        path=f"{base_path}/master",
+        **common,
+    )
+    builder.add_fader(
+        _dig(layer, "video", "opacity"),
+        key=f"{base_key}:opacity",
+        kind="fader",
+        name=f"{layer_name} opacity",
+        path=f"{base_path}/video/opacity",
+        **common,
+    )
+    builder.add_fader(
+        _dig(layer, "audio", "volume"),
+        key=f"{base_key}:volume",
+        kind="fader",
+        name=f"{layer_name} volume",
+        path=f"{base_path}/audio/volume",
+        **common,
+    )
+    builder.add_toggle(
+        layer.get("bypassed"),
+        key=f"{base_key}:bypassed",
+        name=f"{layer_name} bypassed",
+        toggle_type="bypassed",
+        path=f"{base_path}/bypassed",
+        **common,
+    )
+    builder.add_toggle(
+        layer.get("solo"),
+        key=f"{base_key}:solo",
+        name=f"{layer_name} solo",
+        toggle_type="solo",
+        path=f"{base_path}/solo",
+        **common,
+    )
 
-    layers = data.get("layers")
-    if not isinstance(layers, list):
-        return CompositionModel(faders=faders, clips=clips)
-
-    for position, layer in enumerate(layers, start=1):
-        if not isinstance(layer, dict):
-            continue
-        layer_name = _param_value(layer.get("name"), f"Layer {position}")
-        master = _parse_range(layer.get("master"))
-        if master is not None:
-            param_id, value, minimum, maximum = master
-            layer_id = layer.get("id")
-            key = (
-                f"layer:{layer_id}" if layer_id is not None else f"pos:{position}"
-            )
-            faders[key] = FaderState(
-                key=key,
-                kind=KIND_LAYER,
-                name=layer_name,
-                parameter_id=param_id,
-                parameter_path=layer_master_path(position),
-                layer_id=int(layer_id) if layer_id is not None else None,
-                layer_index=position,
-                value=value,
-                minimum=minimum,
-                maximum=maximum,
-            )
-
-        layer_clips = layer.get("clips")
-        if not isinstance(layer_clips, list):
-            continue
+    layer_clips = layer.get("clips")
+    if isinstance(layer_clips, list):
         for clip_position, clip in enumerate(layer_clips, start=1):
             state = _parse_clip(clip, layer_name, position, clip_position)
             if state is not None:
-                clips[state.key] = state
+                builder.clips[state.key] = state
 
-    return CompositionModel(faders=faders, clips=clips)
+
+def parse_composition(data: dict[str, Any]) -> CompositionModel:
+    """Parse composition JSON into flattened state maps."""
+    builder = _ModelBuilder()
+
+    # Composition-level faders.
+    builder.add_fader(
+        data.get("master"),
+        key=KIND_COMPOSITION,  # legacy key kept for existing entity ids
+        kind=KIND_COMPOSITION,
+        name="Composition master",
+        path=COMPOSITION_MASTER_PATH,
+    )
+    builder.add_fader(
+        data.get("speed"),
+        key="composition:speed",
+        kind="fader",
+        name="Composition speed",
+        path="/composition/speed",
+    )
+    builder.add_fader(
+        _dig(data, "video", "opacity"),
+        key="composition:opacity",
+        kind="fader",
+        name="Composition opacity",
+        path="/composition/video/opacity",
+    )
+    builder.add_fader(
+        _dig(data, "audio", "volume"),
+        key="composition:volume",
+        kind="fader",
+        name="Composition volume",
+        path="/composition/audio/volume",
+    )
+    builder.add_fader(
+        _dig(data, "crossfader", "phase"),
+        key="crossfader",
+        kind="fader",
+        name="Crossfader",
+        path="/composition/crossfader/phase",
+    )
+
+    builder.add_toggle(
+        data.get("bypassed"),
+        key="composition:bypassed",
+        name="Composition bypassed",
+        toggle_type="bypassed",
+        path="/composition/bypassed",
+    )
+
+    # Layers (masters, opacity, volume, bypassed, solo, clips).
+    layers = data.get("layers")
+    if isinstance(layers, list):
+        for position, layer in enumerate(layers, start=1):
+            if isinstance(layer, dict):
+                _parse_layer(builder, layer, position)
+
+    # Layer group masters.
+    groups = data.get("layergroups")
+    if isinstance(groups, list):
+        for position, group in enumerate(groups, start=1):
+            if not isinstance(group, dict):
+                continue
+            group_id = group.get("id")
+            group_key = (
+                f"group:{group_id}"
+                if group_id is not None
+                else f"grouppos:{position}"
+            )
+            builder.add_fader(
+                group.get("master"),
+                key=f"{group_key}:master",
+                kind="fader",
+                name=(
+                    f"{_param_value(group.get('name'), f'Group {position}')}"
+                    " master"
+                ),
+                path=f"/composition/layergroups/{position}/master",
+            )
+
+    # Column trigger buttons.
+    columns = data.get("columns")
+    if isinstance(columns, list):
+        for position, column in enumerate(columns, start=1):
+            if not isinstance(column, dict):
+                continue
+            column_id = column.get("id")
+            key = (
+                f"column:{column_id}"
+                if column_id is not None
+                else f"columnpos:{position}"
+            )
+            custom_name = _param_value(column.get("name"))
+            builder.triggers[key] = TriggerState(
+                key=key,
+                name=(
+                    f"Column {custom_name}"
+                    if custom_name
+                    else f"Column {position}"
+                ),
+                trigger_type="column",
+                column_index=position,
+            )
+
+    # Global actions.
+    builder.triggers["disconnect_all"] = TriggerState(
+        key="disconnect_all",
+        name="Disconnect all",
+        trigger_type="disconnect_all",
+    )
+    tap_id = _param_id(_dig(data, "tempocontroller", "tempo_tap"))
+    if tap_id is not None:
+        builder.triggers["tempo_tap"] = TriggerState(
+            key="tempo_tap",
+            name="Tap tempo",
+            trigger_type="parameter",
+            parameter_id=tap_id,
+        )
+
+    return CompositionModel(
+        faders=builder.faders,
+        clips=builder.clips,
+        toggles=builder.toggles,
+        triggers=builder.triggers,
+    )
 
 
 def extract_parameter_update(

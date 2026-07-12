@@ -109,11 +109,29 @@ class ResolumeClient:
             raise ResolumeConnectionError("Composition response was not JSON")
         return data
 
-    async def async_set_parameter(self, parameter_id: int, value: float) -> None:
+    async def async_set_parameter(
+        self, parameter_id: int, value: float | bool
+    ) -> None:
         """Set a parameter value by its unique id."""
         await self._request(
             "PUT", f"/parameter/by-id/{parameter_id}", json={"value": value}
         )
+
+    async def async_trigger_parameter(self, parameter_id: int) -> None:
+        """Trigger an event parameter (e.g. tap tempo) by its unique id."""
+        await self._request(
+            "POST", f"/parameter/by-id/{parameter_id}/trigger"
+        )
+
+    async def async_connect_column(self, column_index: int) -> None:
+        """Trigger (connect) a column by its position (1-based)."""
+        await self._request(
+            "POST", f"/composition/columns/{column_index}/connect"
+        )
+
+    async def async_disconnect_all(self) -> None:
+        """Disconnect all clips in the composition."""
+        await self._request("POST", "/composition/disconnect-all")
 
     async def async_connect_clip(
         self, layer_index: int, clip_index: int
